@@ -1,12 +1,23 @@
-import { NestFactory, Reflector } from '@nestjs/core';
-import { ClassSerializerInterceptor, ValidationPipe } from '@nestjs/common';
+import { NestFactory, HttpAdapterHost } from '@nestjs/core';
+import { Logger, ValidationPipe } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import { initializeTransactionalContext } from 'typeorm-transactional';
 import { AppModule } from './app.module.js';
-import { ResponseInterceptor } from './common/interceptors/response.interceptors.js';
-import { HttpExceptionFilter } from './common/filters/http-exception.filter.js';
+import { AllExceptionsFilter } from './common/filters/http-exception.filter.js';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  initializeTransactionalContext();
+
+  const logger = new Logger('Bootstrap');
+  const app = await NestFactory.create(AppModule, { bufferLogs: true });
+
+  const corsOrigin = process.env.CORS_ORIGIN ?? '*';
+  app.enableCors({
+    origin: corsOrigin,
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
+    credentials: corsOrigin !== '*',
+  });
 
   app.useGlobalPipes(
     new ValidationPipe({
@@ -16,12 +27,7 @@ async function bootstrap() {
     }),
   );
 
-  app.useGlobalInterceptors(
-    new ClassSerializerInterceptor(app.get(Reflector)),
-    new ResponseInterceptor(),
-  );
-
-  app.useGlobalFilters(new HttpExceptionFilter());
+  app.useGlobalFilters(new AllExceptionsFilter(app.get(HttpAdapterHost)));
 
   if (process.env.NODE_ENV !== 'production') {
     const config = new DocumentBuilder()
@@ -34,6 +40,9 @@ async function bootstrap() {
     SwaggerModule.setup('docs', app, document);
   }
 
-  await app.listen(parseInt(process.env.PORT ?? '3000', 10));
+  const port = parseInt(process.env.PORT ?? '3000', 10);
+  const env = process.env.NODE_ENV ?? 'development';
+  await app.listen(port);
+  logger.log(`Application running on port ${port} [${env}]`);
 }
 bootstrap();

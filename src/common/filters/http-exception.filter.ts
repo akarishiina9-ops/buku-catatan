@@ -5,39 +5,58 @@ import {
   HttpException,
   HttpStatus,
 } from '@nestjs/common';
-import { Request, Response } from 'express';
-import { IResponseEntity } from '../interfaces/response.interface.js';
+import { HttpAdapterHost } from '@nestjs/core';
+import {
+  IHttpExceptionResponse,
+  IResponseEntity,
+} from '../interfaces/response.interface.js';
 
 @Catch()
-export class HttpExceptionFilter implements ExceptionFilter {
-  catch(exception: unknown, host: ArgumentsHost) {
-    const ctx = host.switchToHttp();
-    const response = ctx.getResponse<Response>();
-    const request = ctx.getRequest<Request>();
+export class AllExceptionsFilter implements ExceptionFilter {
+  constructor(private readonly httpAdapterHost: HttpAdapterHost) {}
 
-    const status =
+  catch(exception: unknown, host: ArgumentsHost): void {
+    const { httpAdapter } = this.httpAdapterHost;
+
+    const ctx = host.switchToHttp();
+    const request = ctx.getRequest<Request>();
+    const response = ctx.getResponse<Response>();
+
+    const httpStatus: HttpStatus =
       exception instanceof HttpException
         ? exception.getStatus()
         : HttpStatus.INTERNAL_SERVER_ERROR;
 
-    let message: string | string[] = 'Internal server error';
+    const message: string = this.resolveMessage(exception);
 
+    const responseBody: IResponseEntity = {
+      code: httpStatus,
+      status: false,
+      message,
+    };
+
+    httpAdapter.reply(response, responseBody, httpStatus);
+  }
+
+  private resolveMessage(exception: unknown): string {
     if (exception instanceof HttpException) {
       const res = exception.getResponse();
+
       if (typeof res === 'string') {
-        message = res;
-      } else if (typeof res === 'object' && res !== null && 'message' in res) {
-        message = (res as any).message;
+        return res;
+      }
+
+      if (typeof res === 'object' && res !== null) {
+        const body = res as IHttpExceptionResponse;
+        const { message } = body;
+        return Array.isArray(message) ? message.join(', ') : message;
       }
     }
 
-    const body: IResponseEntity = {
-      statusCode: status,
-      message: Array.isArray(message) ? message.join(', ') : message,
-      data: null,
-      timestamp: new Date().toISOString(),
-    };
+    if (exception instanceof Error) {
+      return exception.message;
+    }
 
-    response.status(status).json(body);
+    return 'Internal server error';
   }
 }

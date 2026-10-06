@@ -4,33 +4,54 @@ import {
   Injectable,
   NestInterceptor,
 } from '@nestjs/common';
+import { Response } from 'express';
 import { Observable } from 'rxjs';
 import { map } from 'rxjs/operators';
-import { IResponseEntity } from '../interfaces/response.interface.js';
+import {
+  ImetaPagination,
+  IResponseEntity,
+  IResponsePageWrapper,
+} from '../interfaces/response.interface.js';
+import { MessageService } from '../services/message.service.js';
+
+type InterceptorResult = unknown[] | IResponsePageWrapper<unknown> | unknown;
 
 @Injectable()
-export class ResponseInterceptor<T>
-  implements NestInterceptor<T, IResponseEntity<T>>
-{
+export class ResponseInterceptor implements NestInterceptor {
+  constructor(private readonly messageService: MessageService) {}
+
   intercept(
     context: ExecutionContext,
-    next: CallHandler,
-  ): Observable<IResponseEntity<T>> {
-    const ctx = context.switchToHttp();
-    const response = ctx.getResponse();
+    next: CallHandler<InterceptorResult>,
+  ): Observable<IResponseEntity<unknown>> {
+    const httpResponse = context.switchToHttp().getResponse<Response>();
 
     return next.handle().pipe(
-      map((result) => {
-        const isPaginated =
-          result && typeof result === 'object' && 'data' in result && 'meta' in result;
-
-        return {
-          statusCode: response.statusCode,
-          message: 'Success',
-          data: isPaginated ? result.data : result ?? null,
-          ...(isPaginated ? { meta: result.meta } : {}),
-          timestamp: new Date().toISOString(),
+      map((res: InterceptorResult): IResponseEntity<unknown> => {
+        const response: IResponseEntity<unknown> = {
+          code: httpResponse.statusCode,
+          status: true,
+          message:
+            this.messageService?.getMessage() || 'Successfully retrieve data',
         };
+
+        if (res) {
+          if (Array.isArray(res)) {
+            response.data = res;
+          } else if (
+            typeof res === 'object' &&
+            'meta' in res &&
+            res.meta !== null
+          ) {
+            const paged = res as IResponsePageWrapper<unknown>;
+            response.data = paged.data;
+            response.meta = paged.meta as ImetaPagination;
+          } else {
+            response.data = res;
+          }
+        }
+
+        return response;
       }),
     );
   }
