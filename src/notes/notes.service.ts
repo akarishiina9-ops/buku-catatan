@@ -1,17 +1,22 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { CACHE_MANAGER } from '@nestjs/cache-manager';
+import * as cacheManager_1 from 'cache-manager';
 import { Note } from './note.entity.js';
 import { CreateNoteDto } from './dto/create-note.dto.js';
 import { UpdateNoteDto } from './dto/update-note.dto.js';
 import { PaginationDto } from '../common/dto/pagination.dto.js';
+import { IResponsePageWrapper } from '../common/interfaces/response.interface.js';
 
 @Injectable()
 export class NotesService {
   constructor(
     @InjectRepository(Note)
     private readonly noteRepo: Repository<Note>,
-  ) {}
+    @Inject(CACHE_MANAGER)
+    private readonly cacheManager: cacheManager_1.Cache,
+  ) { }
 
   async create(userId: string, dto: CreateNoteDto) {
     const note = this.noteRepo.create({
@@ -22,7 +27,7 @@ export class NotesService {
     return this.noteRepo.save(note);
   }
 
-  async findAll(userId: string, query: PaginationDto) {
+  async findAll(userId: string, query: PaginationDto): Promise<IResponsePageWrapper<Note>> {
     const { page, limit, search, tag } = query;
 
     const qb = this.noteRepo
@@ -48,29 +53,39 @@ export class NotesService {
     return {
       data,
       meta: {
+        totalPages: Math.ceil(total / limit),
+        totalData: total,
+        totalDataPerPage: limit,
         page,
         limit,
-        total,
-        totalPages: Math.ceil(total / limit),
       },
     };
   }
 
-  async findOne(userId: string, id: string) {
+  async findOne(userId: string, id: string): Promise<Note> {
+    const cacheKey = `note:${userId}:${id}`;
+    const cached = await this.cacheManager.get<Note>(cacheKey);
+    if (cached) return cached;
+
     const note = await this.noteRepo.findOne({ where: { id, userId } });
     if (!note) throw new NotFoundException('Note not found');
+
+    await this.cacheManager.set(cacheKey, note);
     return note;
   }
 
   async update(userId: string, id: string, dto: UpdateNoteDto) {
     const note = await this.findOne(userId, id);
     Object.assign(note, dto);
-    return this.noteRepo.save(note);
+    const updated = await this.noteRepo.save(note);
+    await this.cacheManager.del(`note:${userId}:${id}`);
+    return updated;
   }
 
   async remove(userId: string, id: string) {
     const note = await this.findOne(userId, id);
     await this.noteRepo.remove(note);
+    await this.cacheManager.del(`note:${userId}:${id}`);
     return { id };
   }
 }

@@ -8,17 +8,26 @@ import { Response } from 'express';
 import { Observable } from 'rxjs';
 import { map } from 'rxjs/operators';
 import {
-  ImetaPagination,
   IResponseEntity,
   IResponsePageWrapper,
 } from '../interfaces/response.interface.js';
 import { MessageService } from '../services/message.service.js';
 
+function isPagedResponse(val: unknown): val is IResponsePageWrapper<unknown> {
+  return (
+    typeof val === 'object' &&
+    val !== null &&
+    'data' in val &&
+    'meta' in val &&
+    val.meta !== null
+  );
+}
+
 type InterceptorResult = unknown[] | IResponsePageWrapper<unknown> | unknown;
 
 @Injectable()
 export class ResponseInterceptor implements NestInterceptor {
-  constructor(private readonly messageService: MessageService) {}
+  constructor(private readonly messageService: MessageService) { }
 
   intercept(
     context: ExecutionContext,
@@ -38,14 +47,9 @@ export class ResponseInterceptor implements NestInterceptor {
         if (res) {
           if (Array.isArray(res)) {
             response.data = res;
-          } else if (
-            typeof res === 'object' &&
-            'meta' in res &&
-            res.meta !== null
-          ) {
-            const paged = res as IResponsePageWrapper<unknown>;
-            response.data = paged.data;
-            response.meta = paged.meta as ImetaPagination;
+          } else if (isPagedResponse(res)) {
+            response.data = res.data;
+            response.meta = res.meta;
           } else {
             response.data = res;
           }

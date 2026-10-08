@@ -1,8 +1,3 @@
-export enum ResponseStatus {
-  SUCCESS = 'success',
-  ERROR = 'error',
-}
-
 /** Shape of the object returned by HttpException.getResponse() */
 export interface IHttpExceptionResponse {
   statusCode: number;
@@ -24,6 +19,7 @@ export interface IResponseEntity<T = unknown> {
   message: string;
   data?: T;
   meta?: ImetaPagination;
+  path?: string;
 }
 
 export interface IResponsePageWrapper<T> {
